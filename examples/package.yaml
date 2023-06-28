@@ -1,0 +1,3 @@
+dependencies:
+  ads1115:
+    path: ..

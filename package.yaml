@@ -1,0 +1,4 @@
+name: ads1115
+description: Driver for the ADS1115, a 4 channel high precision analog to digital converter.
+environment:
+  sdk: ^2.0.0-alpha.86
