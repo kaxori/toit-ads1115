@@ -54,16 +54,6 @@ class Ads1115:
   static MODE_CONTIN_ ::= 0x0000  // Continuous conversion mode.
   static MODE_SINGLE_ ::= 0x0100  // Power-down single-shot mode (default).
 
-  static DR_MASK_ ::= 0x00E0     // Values ADS1015/ADS1115.
-  static DR_128SPS_ ::= 0x0000   // 128 /8 samples per second.
-  static DR_250SPS_ ::= 0x0020   // 250 /16 samples per second.
-  static DR_490SPS_ ::= 0x0040   // 490 /32 samples per second.
-  static DR_920SPS_ ::= 0x0060   // 920 /64 samples per second.
-  static DR_1600SPS_ ::= 0x0080  // 1600/128 samples per second (default).
-  static DR_2400SPS_ ::= 0x00A0  // 2400/250 samples per second.
-  static DR_3300SPS_ ::= 0x00C0  // 3300/475 samples per second.
-  static DR_860SPS_ ::= 0x00E0  // -   /860 samples per Second.
-
   static CMODE_MASK_ ::= 0x0010
   static CMODE_TRAD_ ::= 0x0000  // Traditional comparator with hysteresis (default).
   static CMODE_WINDOW_ ::= 0x0010  // Window comparator.
@@ -83,23 +73,14 @@ class Ads1115:
   // Disable the comparator and put ALERT/RDY in high state (default).
   static CQUE_NONE_ ::= 0x0003
 
-
-  static GAINS_PGA_6_144V_ ::= 0
-  static GAINS_PGA_4_096V_ ::= 1  // 1x.
-  static GAINS_PGA_2_048V_ ::= 2  // 2x.
-  static GAINS_PGA_1_024V_ ::= 3  // 4x.
-  static GAINS_PGA_0_512V_ ::= 4  // 8x.
-  static GAINS_PGA_0_256V_ ::= 5  // 16x.
-
-
-  static RATES_DR_8SPS_   ::= 0 // 8 samples per second.
-  static RATES_DR_16SPS_  ::= 1 // 16 samples per second.
-  static RATES_DR_32SPS_  ::= 2 // 32 samples per second.
-  static RATES_DR_64SPS_  ::= 3 // 64 samples per second.
-  static RATES_DR_128SPS_ ::= 4 // 128 samples per second (default).
-  static RATES_DR_250SPS_ ::= 5 // 250 samples per second.
-  static RATES_DR_475SPS_ ::= 6 // 475 samples per second.
-  static RATES_DR_860SPS_ ::= 7 // 860 samples per Second.
+  static RATES_DR_8SPS_   ::= 0x0000 // 8 samples per second.
+  static RATES_DR_16SPS_  ::= 0x0020 // 16 samples per second.
+  static RATES_DR_32SPS_  ::= 0x0040 // 32 samples per second.
+  static RATES_DR_64SPS_  ::= 0x0060 // 64 samples per second.
+  static RATES_DR_128SPS_ ::= 0x0080 // 128 samples per second (default).
+  static RATES_DR_250SPS_ ::= 0x00A0 // 250 samples per second.
+  static RATES_DR_475SPS_ ::= 0x00C0 // 475 samples per second.
+  static RATES_DR_860SPS_ ::= 0x00E0 // 860 samples per Second.
 
 
   static GAINS_TWOTHIRDS_ ::= 6.144
@@ -118,12 +99,17 @@ class Ads1115:
   static CHANNELS_MUX_DIFF_1_3_ ::= [1, 3]
   static CHANNELS_MUX_DIFF_2_3_ ::= [2, 3]
 
-  static CONVERT_RAW_TO_VOLT_ ::=  4.096 / 32768
+  // Table 3 of the datasheet.
+  // If the programmable gain amplifier (PGA) is set to
+  // PGA_4_096V_, then the full scale range of the sensor is +/- 4.096V,
+  // and the LSB size is 125uV.
+  static CONVERT_RAW_TO_VOLT_PGA_4_096V ::=  0.000125
 
   registers_ /serial.Registers ::= ?
 
   constructor device/serial.Device:
     registers_ = device.registers
+
 
   /**
   Reads the voltage on the given channel.
@@ -132,7 +118,7 @@ class Ads1115:
   */
   read --channel/int -> float:
     raw := read --raw --channel=channel
-    return raw * CONVERT_RAW_TO_VOLT_
+    return raw * CONVERT_RAW_TO_VOLT_PGA_4_096V
 
   /**
   Reads the raw value on the given channel.
@@ -143,21 +129,45 @@ class Ads1115:
     if not 0 <= channel <= 3: throw "INVALID ARGUMENT"
     if not raw: throw "INVALID ARGUMENT"
 
+    data_rate := RATES_DR_475SPS_  // 475 samples per second.
     config := 0
         | CQUE_NONE_        // Disable comparator queue.
         | CLAT_NONLAT_      // Don't latch the comparator.
         | CPOL_ACTVLOW_     // Alert/Rdy active low.
         | CMODE_TRAD_       // Traditional comparator.
-        | RATES_DR_475SPS_  // 475 samples per second.
+        | data_rate         // 475 samples per second.
         | MODE_SINGLE_      // Single-shot mode.
-        | OS_SINGLE_        // Begin a single conversion.
         // When changing this configuration, don't forget to update the toitdoc of $read.
         | PGA_4_096V_       // Range +/- 4.096V.
         | SINGLE_ENDED_[channel]
+        | OS_SINGLE_        // Begin a single conversion.
 
     write_register_ REGISTER_CONFIG_ config
-    while is_busy_: sleep --ms=1
+
+    expected_busy_ms := data_rate_to_busy_ms_ data_rate
+    while is_busy_:
+      if expected_busy_ms > 10:
+        sleep --ms=10
+        expected_busy_ms -= 10
+      else:
+        yield
+
     return registers_.read_i16_be REGISTER_CONVERT_
+
+  /**
+  Returns the amount of time the sensor is expected to be busy
+    doing the conversion.
+  */
+  data_rate_to_busy_ms_ data_rate/int -> int:
+    if data_rate == RATES_DR_8SPS_: return 125
+    if data_rate == RATES_DR_16SPS_: return 63
+    if data_rate == RATES_DR_32SPS_: return 32
+    if data_rate == RATES_DR_64SPS_: return 16
+    if data_rate == RATES_DR_128SPS_: return 8
+    if data_rate == RATES_DR_250SPS_: return 4
+    if data_rate == RATES_DR_475SPS_: return 2
+    if data_rate == RATES_DR_860SPS_: return 1
+    throw "INVALID ARGUMENT"
 
   is_busy_ -> bool:
     config_value := registers_.read_u16_be REGISTER_CONFIG_

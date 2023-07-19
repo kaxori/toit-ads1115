@@ -35,5 +35,5 @@ main:
 
 ## Resources
 
-Datasheet: https://www.ti.com/lit/ds/symlink/ads1115.pdf
-Adafruit's document on their breakout board: https://cdn-learn.adafruit.com/downloads/pdf/adafruit-4-channel-adc-breakouts.pdf
+* Datasheet: https://www.ti.com/lit/ds/symlink/ads1115.pdf
+* Adafruit's document on their breakout board: https://cdn-learn.adafruit.com/downloads/pdf/adafruit-4-channel-adc-breakouts.pdf
